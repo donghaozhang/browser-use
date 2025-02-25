@@ -187,4 +187,4 @@ gcp-login.json
 *.json
 *.jsonl
 
-uv.lock
+uv.lock.env
