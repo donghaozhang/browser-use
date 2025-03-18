@@ -13,18 +13,32 @@ async def main():
     logger.debug("Creating browser instance...")
     browser = Browser()
     
-    # Let's try to directly create a page without using context
-    logger.debug("Creating new page...")
-    page = await browser.page()  # Try this method instead
+    # Create a browser context first
+    logger.debug("Creating browser context...")
+    context = await browser.new_context()
     
-    logger.debug("Navigating to Google...")
-    await page.goto("https://www.google.com")
-    
-    logger.debug("Waiting for 5 seconds...")
-    await asyncio.sleep(5)
-    
-    logger.debug("Closing browser...")
-    await browser.close()
+    try:
+        # Create a new tab using the context.create_new_tab() method
+        logger.debug("Creating new tab...")
+        await context.create_new_tab()
+        
+        # Get the current page/tab
+        session = await context.get_session()
+        page = await context.get_current_page()
+        
+        logger.debug("Navigating to Google...")
+        await page.goto("https://www.google.com")
+        
+        logger.debug("Waiting for 5 seconds...")
+        await asyncio.sleep(5)
+    finally:
+        # Close the context first
+        logger.debug("Closing context...")
+        await context.close()
+        
+        # Then close the browser
+        logger.debug("Closing browser...")
+        await browser.close()
     
     logger.debug("Done!")
 

@@ -6,6 +6,7 @@ import subprocess
 import time
 import json
 import random
+from langchain_openai import ChatOpenAI
 
 # Set up logging with INFO level instead of DEBUG to reduce output
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -14,6 +15,14 @@ logger = logging.getLogger(__name__)
 # Reduce logging from other modules
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 logging.getLogger('browser_use').setLevel(logging.INFO)
+
+# Try to import the required modules, install if missing
+try:
+    from langchain_openai import ChatOpenAI
+except ImportError:
+    logger.info("Installing missing langchain-openai package...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "langchain-openai"])
+    from langchain_openai import ChatOpenAI
 
 # Try to import the required modules, install if missing
 try:
@@ -30,7 +39,7 @@ import asyncio
 
 from browser_use import Agent, Controller
 from browser_use.browser.browser import Browser, BrowserConfig
-from browser_use.browser.context import BrowserContext
+from browser_use.browser.context import BrowserContext, BrowserContextConfig
 
 from dotenv import load_dotenv
 load_dotenv(dotenv_path="D:/AI_play/AI_Code/browser-use/.env")
@@ -75,7 +84,9 @@ chrome_process = subprocess.Popen([
     f"--user-data-dir={user_data_dir}",  # Point to the parent User Data directory
     f"--profile-directory={profile_name}",  # Specify which profile to use
     "--remote-debugging-port=9222",
-    # "--disable-blink-features=AutomationControlled"  # Try to avoid automation detection
+    # "--disable-blink-features=AutomationControlled",  # Try to avoid automation detection
+    "--window-size=1280,1100",  # Set explicit window size
+    "--start-maximized"  # Ensure window is maximized
 ])
 
 # Wait for Chrome to start
@@ -89,8 +100,17 @@ browser = Browser(
         headless=False,
         # Connect to the running Chrome instance via CDP
         cdp_url="http://localhost:9222",
+        # Set explicit window size in the browser config
+        new_context_config=BrowserContextConfig(
+            browser_window_size={'width': 1280, 'height': 1100},
+            no_viewport=False
+        )
     )
 )
+
+# Add a delay to ensure the browser is fully initialized
+logger.info("Waiting for browser to fully initialize...")
+time.sleep(3)
 
 async def run_task_with_retry(browser, task_description, max_retries=3, initial_wait=60, max_page_load_retries=5):
     """Run a task with retry logic for rate limits and page load failures"""
@@ -100,17 +120,20 @@ async def run_task_with_retry(browser, task_description, max_retries=3, initial_
     while retry_count <= max_retries:
         try:
             # Configure the LLM with Gemini Flash 2.0
+            # llm = ChatOpenAI(model='gpt-4o')
+            
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",  # This is Gemini Flash 2.0
+                model="gemini-2.0-flash-exp",  # This is Gemini Flash 2.0
                 temperature=0.2,
                 convert_system_message_to_human=True,
                 google_api_key=os.getenv("GEMINI_API_KEY")  # Get from environment
             )
-            
+
             agent = Agent(
                 task=task_description,
                 llm=llm,
                 browser=browser,
+                use_vision=True,
             )
             
             logger.info(f"Running task: {task_description}")
@@ -127,8 +150,8 @@ async def run_task_with_retry(browser, task_description, max_retries=3, initial_
                     page_load_retries += 1
                     logger.info(f"Attempting to refresh the page (attempt {page_load_retries}/{max_page_load_retries})...")
                     try:
-                        # Try to navigate directly to LinkedIn again
-                        await browser.goto("https://www.linkedin.com")
+                        # Try to navigate directly to the target site again
+                        await browser.goto("https://tongyi.aliyun.com/read/")
                         logger.info("Page refreshed successfully")
                         time.sleep(3)  # Wait for page to load
                         continue
@@ -147,13 +170,27 @@ async def run_task_with_retry(browser, task_description, max_retries=3, initial_
                 page_load_retries += 1
                 logger.info(f"Page load failed. Attempting to refresh (attempt {page_load_retries}/{max_page_load_retries})...")
                 try:
-                    # Try to navigate directly to LinkedIn again
-                    await browser.goto("https://www.linkedin.com")
+                    # Try to navigate directly to the target site again
+                    await browser.goto("https://tongyi.aliyun.com/read/")
                     logger.info("Page refreshed successfully")
                     time.sleep(3)  # Wait for page to load
                     continue
                 except Exception as refresh_error:
                     logger.error(f"Error refreshing page: {refresh_error}")
+            elif "Cannot take screenshot with 0 width" in str(e) and page_load_retries < max_page_load_retries:
+                page_load_retries += 1
+                logger.info(f"Screenshot error. Attempting to resize browser window (attempt {page_load_retries}/{max_page_load_retries})...")
+                try:
+                    # Try to resize the browser window
+                    page = await browser.get_current_page()
+                    await page.set_viewport_size({"width": 1280, "height": 1100})
+                    # Try to navigate directly to the target site again
+                    await browser.goto("https://tongyi.aliyun.com/read/")
+                    logger.info("Browser window resized and page refreshed successfully")
+                    time.sleep(3)  # Wait for page to load
+                    continue
+                except Exception as resize_error:
+                    logger.error(f"Error resizing browser window: {resize_error}")
             else:
                 logger.error(f"Failed to complete task after {retry_count} retries: {task_description}")
                 return False
@@ -161,7 +198,7 @@ async def run_task_with_retry(browser, task_description, max_retries=3, initial_
 async def main():
     try:
         # Combined task approach - simpler and might avoid some of the page load issues
-        task = "1 Go to linkedin.com, 2then click on the My Network tab, find 5 people with more than 5 mutual connections, and send connection requests to them"
+        task = "1 Go to https://tongyi.aliyun.com/read/ 2 分别点击前三个文章 3 点击 右上角 导出 3 勾选导读的 取消原文的勾选 4 文档格式然后选md格式 5进行导出 5确认他在下载文件夹"
         await run_task_with_retry(browser, task, max_retries=3, initial_wait=60, max_page_load_retries=5)
         
         # Allow manual interaction before closing
